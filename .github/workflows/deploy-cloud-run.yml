@@ -129,7 +129,7 @@ jobs:
             --memory=2Gi \
             --cpu=2 \
             --timeout=300 \
-            --set-env-vars="^|^DATABASE_URL=${DB_URL}|DATABASE_READ_URL=${DB_URL}|DATABASE_WRITE_URL=${DB_URL}|DATABASE_DIRECT_URL=${DB_URL}|NODE_ENV=production|API_PORT=8080|REDIS_URL=redis://10.109.82.179:6379|USE_POOL=true|API_KEY_PREFIX=cal_|NEXTAUTH_SECRET=${{ secrets.CALDIY_NEXTAUTH_SECRET }}|CALENDSO_ENCRYPTION_KEY=${{ secrets.CALDIY_ENCRYPTION_KEY }}|JWT_SECRET=${{ secrets.CALDIY_JWT_SECRET }}|WEB_APP_URL=https://app.cal.com"
+            --set-env-vars="^|^DATABASE_URL=${DB_URL}|DATABASE_READ_URL=${DB_URL}|DATABASE_WRITE_URL=${DB_URL}|DATABASE_DIRECT_URL=${DB_URL}|NODE_ENV=production|API_PORT=8080|REDIS_URL=redis://10.109.82.179:6379|USE_POOL=true|API_KEY_PREFIX=cal_|NEXTAUTH_SECRET=${{ secrets.CALDIY_NEXTAUTH_SECRET }}|CALENDSO_ENCRYPTION_KEY=${{ secrets.CALDIY_ENCRYPTION_KEY }}|JWT_SECRET=${{ secrets.CALDIY_JWT_SECRET }}|WEB_APP_URL=https://app.cal.com|STRIPE_API_KEY=sk_test_placeholder|STRIPE_WEBHOOK_SECRET=whsec_placeholder"
           gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
             --region=${{ env.REGION }} \
             --to-latest
