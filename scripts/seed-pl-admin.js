@@ -1,6 +1,6 @@
 /**
  * Seed script: create the PrecedentLab admin user + API key in cal.diy.
- * Uses pg (raw SQL) to avoid Prisma client TypeScript generation issues.
+ * Uses pg (raw SQL) — avoids needing the Prisma TypeScript generated client.
  *
  * Required env:
  *   DATABASE_URL              - postgres connection string
@@ -8,6 +8,7 @@
  */
 
 const { Client } = require("pg");
+const { randomUUID } = require("crypto");
 
 const ADMIN_EMAIL = "admin-calcom@precedentlab.com";
 const ADMIN_USERNAME = "pl-admin";
@@ -20,14 +21,14 @@ async function main() {
   await client.connect();
 
   try {
-    // Upsert admin user
+    // uuid column is NOT NULL with no db-level default; generate it here.
     const userRes = await client.query(
-      `INSERT INTO "users" (email, username, name, role, "completedOnboarding", "emailVerified", "timeZone", "weekStart")
-       VALUES ($1, $2, $3, 'ADMIN', true, NOW(), 'America/New_York', 'Sunday')
+      `INSERT INTO "users" (email, username, name, uuid, role, "completedOnboarding", "emailVerified", "timeZone", "weekStart")
+       VALUES ($1, $2, $3, $4, 'ADMIN', true, NOW(), 'America/New_York', 'Sunday')
        ON CONFLICT (email) DO UPDATE
          SET role = 'ADMIN', username = $2, "completedOnboarding" = true
        RETURNING id, email`,
-      [ADMIN_EMAIL, ADMIN_USERNAME, "PrecedentLab Admin"]
+      [ADMIN_EMAIL, ADMIN_USERNAME, "PrecedentLab Admin", randomUUID()]
     );
     const userId = userRes.rows[0].id;
     console.log("Admin user upserted: id=" + userId + " email=" + userRes.rows[0].email);
@@ -41,9 +42,7 @@ async function main() {
       console.log("API key already exists: id=" + existing.rows[0].id);
     } else {
       const keyRes = await client.query(
-        `INSERT INTO "ApiKey" ("userId", "hashedKey", note, "expiresAt")
-         VALUES ($1, $2, $3, NULL)
-         RETURNING id`,
+        `INSERT INTO "ApiKey" ("userId", "hashedKey", note, "expiresAt") VALUES ($1, $2, $3, NULL) RETURNING id`,
         [userId, HASHED_KEY, "PrecedentLab pl-api admin key"]
       );
       console.log("API key created: id=" + keyRes.rows[0].id);
