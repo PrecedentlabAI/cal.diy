@@ -1,0 +1,135 @@
+name: Deploy cal.diy API v2 to Cloud Run
+
+on:
+  push:
+    branches: [feat/pl-cloud-run-deploy]
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: project-8b872462-7ac2-4c66-b2a
+  REGION: us-central1
+  REGISTRY: us-central1-docker.pkg.dev/project-8b872462-7ac2-4c66-b2a/pl-docker
+  SERVICE_NAME: calcom-api
+  CLOUD_SQL_CONN: project-8b872462-7ac2-4c66-b2a:us-central1:pl-db
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and push Docker image
+        run: |
+          IMAGE="${{ env.REGISTRY }}/calcom-api:${{ github.sha }}"
+          # Dockerfile needs DATABASE_URL/DATABASE_DIRECT_URL as build args for prisma generate.
+          # prisma generate does not connect to the DB, so a placeholder is safe here.
+          docker build \
+            --build-arg DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder" \
+            --build-arg DATABASE_DIRECT_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder" \
+            -f apps/api/v2/Dockerfile \
+            -t "$IMAGE" \
+            .
+          docker push "$IMAGE"
+
+      - name: Run database migrations
+        run: |
+          IMAGE="${{ env.REGISTRY }}/calcom-api:${{ github.sha }}"
+          DB_URL="${{ secrets.CALDIY_DATABASE_URL }}"
+          gcloud run jobs update calcom-migrate \
+            --image="$IMAGE" \
+            --region=${{ env.REGION }} \
+            --service-account=pl-api-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --add-cloudsql-instances=${{ env.CLOUD_SQL_CONN }} \
+            --vpc-connector=pl-vpc-connector \
+            --vpc-egress=private-ranges-only \
+            --set-env-vars="^|^DATABASE_URL=${DB_URL}|DATABASE_DIRECT_URL=${DB_URL}|NODE_ENV=production" \
+            --command="yarn" \
+            --args="workspace,@calcom/prisma,db-deploy" \
+            --max-retries=0 \
+            --task-timeout=10m \
+          || gcloud run jobs create calcom-migrate \
+            --image="$IMAGE" \
+            --region=${{ env.REGION }} \
+            --service-account=pl-api-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --add-cloudsql-instances=${{ env.CLOUD_SQL_CONN }} \
+            --vpc-connector=pl-vpc-connector \
+            --vpc-egress=private-ranges-only \
+            --set-env-vars="^|^DATABASE_URL=${DB_URL}|DATABASE_DIRECT_URL=${DB_URL}|NODE_ENV=production" \
+            --command="yarn" \
+            --args="workspace,@calcom/prisma,db-deploy" \
+            --max-retries=0 \
+            --task-timeout=10m
+          gcloud run jobs execute calcom-migrate \
+            --region=${{ env.REGION }} \
+            --wait
+
+      - name: Run seed (admin user + API key)
+        run: |
+          IMAGE="${{ env.REGISTRY }}/calcom-api:${{ github.sha }}"
+          DB_URL="${{ secrets.CALDIY_DATABASE_URL }}"
+          gcloud run jobs update calcom-seed \
+            --image="$IMAGE" \
+            --region=${{ env.REGION }} \
+            --service-account=pl-api-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --add-cloudsql-instances=${{ env.CLOUD_SQL_CONN }} \
+            --vpc-connector=pl-vpc-connector \
+            --vpc-egress=private-ranges-only \
+            --set-env-vars="^|^DATABASE_URL=${DB_URL}|DATABASE_DIRECT_URL=${DB_URL}|NODE_ENV=production|CALCOM_ADMIN_API_KEY_HASH=${{ secrets.CALCOM_ADMIN_API_KEY_HASH }}" \
+            --command="node" \
+            --args="scripts/seed-pl-admin.js" \
+            --max-retries=0 \
+            --task-timeout=5m \
+          || gcloud run jobs create calcom-seed \
+            --image="$IMAGE" \
+            --region=${{ env.REGION }} \
+            --service-account=pl-api-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --add-cloudsql-instances=${{ env.CLOUD_SQL_CONN }} \
+            --vpc-connector=pl-vpc-connector \
+            --vpc-egress=private-ranges-only \
+            --set-env-vars="^|^DATABASE_URL=${DB_URL}|DATABASE_DIRECT_URL=${DB_URL}|NODE_ENV=production|CALCOM_ADMIN_API_KEY_HASH=${{ secrets.CALCOM_ADMIN_API_KEY_HASH }}" \
+            --command="node" \
+            --args="scripts/seed-pl-admin.js" \
+            --max-retries=0 \
+            --task-timeout=5m
+          gcloud run jobs execute calcom-seed \
+            --region=${{ env.REGION }} \
+            --wait
+
+      - name: Deploy Cloud Run service
+        run: |
+          IMAGE="${{ env.REGISTRY }}/calcom-api:${{ github.sha }}"
+          DB_URL="${{ secrets.CALDIY_DATABASE_URL }}"
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image="$IMAGE" \
+            --region=${{ env.REGION }} \
+            --platform=managed \
+            --allow-unauthenticated \
+            --service-account=pl-api-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --add-cloudsql-instances=${{ env.CLOUD_SQL_CONN }} \
+            --vpc-connector=pl-vpc-connector \
+            --vpc-egress=private-ranges-only \
+            --port=8080 \
+            --min-instances=0 \
+            --max-instances=3 \
+            --memory=2Gi \
+            --cpu=2 \
+            --timeout=300 \
+            --set-env-vars="^|^DATABASE_URL=${DB_URL}|DATABASE_READ_URL=${DB_URL}|DATABASE_WRITE_URL=${DB_URL}|DATABASE_DIRECT_URL=${DB_URL}|NODE_ENV=production|API_PORT=8080|REDIS_URL=redis://10.109.82.179:6379|USE_POOL=true|API_KEY_PREFIX=cal_|NEXTAUTH_SECRET=${{ secrets.CALDIY_NEXTAUTH_SECRET }}|CALENDSO_ENCRYPTION_KEY=${{ secrets.CALDIY_ENCRYPTION_KEY }}|JWT_SECRET=${{ secrets.CALDIY_JWT_SECRET }}|WEB_APP_URL=https://app.cal.com"
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --to-latest
