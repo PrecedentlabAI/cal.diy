@@ -21,19 +21,20 @@ async function main() {
   await client.connect();
 
   try {
-    // uuid column is NOT NULL with no db-level default; generate it here.
+    // uuid column: NOT NULL, no db-level default (Prisma-level uuid() default)
+    const uuid = randomUUID();
     const userRes = await client.query(
       `INSERT INTO "users" (email, username, name, uuid, role, "completedOnboarding", "emailVerified", "timeZone", "weekStart")
        VALUES ($1, $2, $3, $4, 'ADMIN', true, NOW(), 'America/New_York', 'Sunday')
        ON CONFLICT (email) DO UPDATE
          SET role = 'ADMIN', username = $2, "completedOnboarding" = true
        RETURNING id, email`,
-      [ADMIN_EMAIL, ADMIN_USERNAME, "PrecedentLab Admin", randomUUID()]
+      [ADMIN_EMAIL, ADMIN_USERNAME, "PrecedentLab Admin", uuid]
     );
     const userId = userRes.rows[0].id;
     console.log("Admin user upserted: id=" + userId + " email=" + userRes.rows[0].email);
 
-    // Upsert API key (never expires)
+    // Check if API key already exists
     const existing = await client.query(
       `SELECT id FROM "ApiKey" WHERE "hashedKey" = $1`,
       [HASHED_KEY]
@@ -41,9 +42,11 @@ async function main() {
     if (existing.rows.length > 0) {
       console.log("API key already exists: id=" + existing.rows[0].id);
     } else {
+      // ApiKey.id is a cuid string — Prisma-level default, so we must provide it
+      const apiKeyId = randomUUID();
       const keyRes = await client.query(
-        `INSERT INTO "ApiKey" ("userId", "hashedKey", note, "expiresAt") VALUES ($1, $2, $3, NULL) RETURNING id`,
-        [userId, HASHED_KEY, "PrecedentLab pl-api admin key"]
+        `INSERT INTO "ApiKey" (id, "userId", "hashedKey", note, "expiresAt") VALUES ($1, $2, $3, $4, NULL) RETURNING id`,
+        [apiKeyId, userId, HASHED_KEY, "PrecedentLab pl-api admin key"]
       );
       console.log("API key created: id=" + keyRes.rows[0].id);
     }
