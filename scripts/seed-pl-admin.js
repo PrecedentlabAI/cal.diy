@@ -10,8 +10,8 @@
  *   CALCOM_ADMIN_API_KEY_HASH - SHA256 of stripped API key suffix (no "cal_" prefix)
  */
 
-// The Prisma client is generated to packages/prisma/generated/prisma during Docker build
-const { PrismaClient } = require("../packages/prisma/generated/prisma");
+// Generated client lives at packages/prisma/generated/prisma/client.js (prisma-client provider, cjs)
+const { PrismaClient } = require("../packages/prisma/generated/prisma/client");
 
 const prisma = new PrismaClient();
 
