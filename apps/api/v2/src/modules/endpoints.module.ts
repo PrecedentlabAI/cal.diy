@@ -11,6 +11,7 @@ import { VerifiedResourcesModule } from "@/modules/verified-resources/verified-r
 import type { MiddlewareConsumer, NestModule } from "@nestjs/common";
 import { Module } from "@nestjs/common";
 
+import { PlOAuthModule } from "./pl-oauth/pl-oauth.module";
 import { UsersModule } from "./users/users.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
 
@@ -28,6 +29,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     ConferencingModule,
     CalUnifiedCalendarsModule,
     VerifiedResourcesModule,
+    PlOAuthModule,
   ],
 })
 export class EndpointsModule implements NestModule {

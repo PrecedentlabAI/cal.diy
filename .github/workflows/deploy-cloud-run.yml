@@ -90,6 +90,7 @@ jobs:
             --vpc-connector=pl-vpc-connector \
             --vpc-egress=private-ranges-only \
             --set-env-vars="^|^DATABASE_URL=${DB_URL}|DATABASE_DIRECT_URL=${DB_URL}|NODE_ENV=production|CALCOM_ADMIN_API_KEY_HASH=${{ secrets.CALCOM_ADMIN_API_KEY_HASH }}" \
+            --set-secrets="GOOGLE_API_CREDENTIALS=CALCOM_GOOGLE_API_CREDENTIALS:latest" \
             --command="node" \
             --args="scripts/seed-pl-admin.js" \
             --max-retries=0 \
@@ -102,6 +103,7 @@ jobs:
             --vpc-connector=pl-vpc-connector \
             --vpc-egress=private-ranges-only \
             --set-env-vars="^|^DATABASE_URL=${DB_URL}|DATABASE_DIRECT_URL=${DB_URL}|NODE_ENV=production|CALCOM_ADMIN_API_KEY_HASH=${{ secrets.CALCOM_ADMIN_API_KEY_HASH }}" \
+            --set-secrets="GOOGLE_API_CREDENTIALS=CALCOM_GOOGLE_API_CREDENTIALS:latest" \
             --command="node" \
             --args="scripts/seed-pl-admin.js" \
             --max-retries=0 \

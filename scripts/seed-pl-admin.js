@@ -1,10 +1,16 @@
 /**
- * Seed script: create the PrecedentLab admin user + API key in cal.diy.
- * Uses pg (raw SQL) — avoids needing the Prisma TypeScript generated client.
+ * Seed script: create the PrecedentLab admin user + API key in cal.diy,
+ * and install the google-calendar App row that GCalService reads at
+ * OAuth time (so /v2/oauth/connect/google-calendar can find credentials).
  *
  * Required env:
  *   DATABASE_URL              - postgres connection string
  *   CALCOM_ADMIN_API_KEY_HASH - SHA256 of stripped API key suffix
+ *
+ * Optional env (omit to skip the Google Calendar app seed):
+ *   GOOGLE_API_CREDENTIALS    - JSON from Google Cloud Console. Accepts
+ *                               the {"web": {...}} envelope or just
+ *                               {"client_id": "...", "client_secret": "..."}
  */
 
 const { Client } = require("pg");
@@ -13,6 +19,23 @@ const { randomUUID } = require("crypto");
 const ADMIN_EMAIL = "admin-calcom@precedentlab.com";
 const ADMIN_USERNAME = "pl-admin";
 const HASHED_KEY = process.env.CALCOM_ADMIN_API_KEY_HASH;
+
+function extractGoogleKeys(raw) {
+  if (!raw) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    console.warn("GOOGLE_API_CREDENTIALS is not valid JSON; skipping Google Calendar app seed.");
+    return null;
+  }
+  const inner = parsed.web || parsed.installed || parsed;
+  if (!inner.client_id || !inner.client_secret) {
+    console.warn("GOOGLE_API_CREDENTIALS missing client_id/client_secret; skipping Google Calendar app seed.");
+    return null;
+  }
+  return { client_id: inner.client_id, client_secret: inner.client_secret };
+}
 
 async function main() {
   if (!HASHED_KEY) throw new Error("CALCOM_ADMIN_API_KEY_HASH env var is required");
@@ -49,6 +72,21 @@ async function main() {
         [apiKeyId, userId, HASHED_KEY, "PrecedentLab pl-api admin key"]
       );
       console.log("API key created: id=" + keyRes.rows[0].id);
+    }
+
+    // ── Google Calendar app row ─────────────────────────────────────────
+    const googleKeys = extractGoogleKeys(process.env.GOOGLE_API_CREDENTIALS);
+    if (googleKeys) {
+      await client.query(
+        `INSERT INTO "App" (slug, "dirName", keys, categories, enabled, "updatedAt")
+         VALUES ('google-calendar', 'googlecalendar', $1::jsonb, ARRAY['calendar']::"AppCategories"[], true, NOW())
+         ON CONFLICT (slug) DO UPDATE
+           SET keys = EXCLUDED.keys, enabled = true, "updatedAt" = NOW()`,
+        [JSON.stringify(googleKeys)],
+      );
+      console.log("Google Calendar app installed (slug=google-calendar, enabled=true).");
+    } else {
+      console.log("Skipped Google Calendar app seed (GOOGLE_API_CREDENTIALS not provided).");
     }
 
     console.log("Seed complete.");
