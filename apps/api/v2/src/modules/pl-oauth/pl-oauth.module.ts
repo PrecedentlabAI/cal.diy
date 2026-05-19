@@ -3,11 +3,12 @@ import { Module } from "@nestjs/common";
 import { AppsRepository } from "@/modules/apps/apps.repository";
 import { AuthModule } from "@/modules/auth/auth.module";
 import { CalendarsModule } from "@/platform/calendars/calendars.module";
+import { ConferencingModule } from "@/modules/conferencing/conferencing.module";
 import { PlOAuthController } from "@/modules/pl-oauth/pl-oauth.controller";
 import { PrismaModule } from "@/modules/prisma/prisma.module";
 
 @Module({
-  imports: [PrismaModule, AuthModule, CalendarsModule],
+  imports: [PrismaModule, AuthModule, CalendarsModule, ConferencingModule],
   controllers: [PlOAuthController],
   providers: [AppsRepository],
 })

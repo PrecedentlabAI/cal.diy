@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Logger,
   NotFoundException,
+  Post,
   Query,
   Redirect,
   UseGuards,
@@ -21,6 +22,7 @@ import { ApiAuthGuardOnlyAllow } from "@/modules/auth/decorators/api-auth-guard-
 import { ApiAuthGuard } from "@/modules/auth/guards/api-auth/api-auth.guard";
 import { AppsRepository } from "@/modules/apps/apps.repository";
 import { CalendarsService } from "@/platform/calendars/services/calendars.service";
+import { GoogleMeetService } from "@/modules/conferencing/services/google-meet.service";
 import { PrismaReadService } from "@/modules/prisma/prisma-read.service";
 
 import { GOOGLE_CALENDAR_TYPE, SUCCESS_STATUS } from "@calcom/platform-constants";
@@ -77,6 +79,7 @@ export class PlOAuthController {
     private readonly config: ConfigService,
     private readonly appsRepository: AppsRepository,
     private readonly calendarsService: CalendarsService,
+    private readonly googleMeetService: GoogleMeetService,
     private readonly prismaRead: PrismaReadService,
   ) {}
 
@@ -178,6 +181,44 @@ export class PlOAuthController {
     const url = new URL(parsed.redirectUri);
     url.searchParams.set("google", "connected");
     return { url: url.toString() };
+  }
+
+  /**
+   * Admin-authed Google Meet credential creation. The standard
+   * /v2/conferencing/google-meet/connect endpoint reads the authenticated
+   * user from @GetUser(), which resolves to the admin user when pl-api
+   * uses its admin API key — making the Google Calendar prerequisite
+   * check look at the wrong user. This wrapper accepts ?userId and
+   * provisions Meet for the target user instead.
+   *
+   * Idempotent: returns 200 with already-connected=true if a Meet
+   * credential already exists for the user.
+   */
+  @Post("/connect/google-meet")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ApiAuthGuard)
+  @ApiAuthGuardOnlyAllow(["API_KEY"])
+  async connectGoogleMeet(
+    @Query("userId") userIdRaw: string,
+  ): Promise<{ status: typeof SUCCESS_STATUS; data: { connected: true; already_connected: boolean } }> {
+    const userId = parseInt(userIdRaw ?? "", 10);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      throw new BadRequestException("userId query param required and must be a positive integer");
+    }
+
+    try {
+      await this.googleMeetService.connectGoogleMeetToUser(userId);
+      return { status: SUCCESS_STATUS, data: { connected: true, already_connected: false } };
+    } catch (err) {
+      // GoogleMeetService throws BadRequestException with "already connected" when the
+      // credential exists. Treat it as success — pl-api retries are common after the
+      // OAuth redirect, so we don't want each retry to 400.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/already connected/i.test(msg)) {
+        return { status: SUCCESS_STATUS, data: { connected: true, already_connected: true } };
+      }
+      throw err;
+    }
   }
 
   private async getGoogleOAuthClient(): Promise<OAuth2Client> {
