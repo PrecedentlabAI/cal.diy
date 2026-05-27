@@ -115,7 +115,12 @@ jobs:
       - name: Deploy Cloud Run service
         run: |
           IMAGE="${{ env.REGISTRY }}/calcom-api:${{ github.sha }}"
-          DB_URL="${{ secrets.CALDIY_DATABASE_URL }}"
+          # Cap the Prisma pool per instance. pl-db is a small shared instance
+          # (db-g1-small, max_connections=100) shared with pl-api + pl-worker;
+          # an uncapped pool × maxScale instances starved everything out of
+          # connection slots (Postgres "too many connections" → OAuth 500s,
+          # 2026-05-27). 5 × maxScale(3) = 15 keeps calcom-api's share bounded.
+          DB_URL="${{ secrets.CALDIY_DATABASE_URL }}&connection_limit=5&pool_timeout=20"
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image="$IMAGE" \
             --region=${{ env.REGION }} \
