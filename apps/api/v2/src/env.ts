@@ -43,6 +43,11 @@ export type Environment = {
   USE_POOL: string;
   VERCEL: string;
   ENABLE_ASYNC_TASKER: string;
+  // PL OAuth wrapper (PrecedentLab fork)
+  CALCOM_OAUTH_STATE_HMAC_KEY: string;
+  CALCOM_OAUTH_STATE_HMAC_KEY_PREVIOUS: string;
+  PL_API_WEBHOOK_URL: string;
+  PL_API_WEBHOOK_SECRET: string;
 };
 
 export const getEnv = <K extends keyof Environment>(key: K, fallback?: Environment[K]): Environment[K] => {

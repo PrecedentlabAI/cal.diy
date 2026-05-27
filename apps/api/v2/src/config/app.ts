@@ -44,6 +44,12 @@ const loadConfig = (): AppConfig => {
     app: {
       baseUrl: getEnv("WEB_APP_URL", "https://app.cal.com"),
     },
+    plOAuth: {
+      stateHmacKey: getEnv("CALCOM_OAUTH_STATE_HMAC_KEY", ""),
+      stateHmacKeyPrevious: getEnv("CALCOM_OAUTH_STATE_HMAC_KEY_PREVIOUS", ""),
+      webhookUrl: getEnv("PL_API_WEBHOOK_URL", ""),
+      webhookSecret: getEnv("PL_API_WEBHOOK_SECRET", ""),
+    },
     e2e: getEnv("IS_E2E", "false") === "true",
     enableSlotsWorkers: getEnv("ENABLE_SLOTS_WORKERS", "true") === "true",
     slotsWorkerPoolSize: Number(getEnv("SLOTS_WORKER_POOL_SIZE", "4")),

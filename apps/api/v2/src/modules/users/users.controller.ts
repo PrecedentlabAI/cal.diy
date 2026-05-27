@@ -1,14 +1,28 @@
 import { SUCCESS_STATUS } from "@calcom/platform-constants";
-import { Body, Controller, HttpCode, HttpStatus, Logger, Post, UseGuards } from "@nestjs/common";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  ForbiddenException,
+  HttpCode,
+  HttpStatus,
+  Logger,
+  NotFoundException,
+  Param,
+  Post,
+  UseGuards,
+} from "@nestjs/common";
 import { ApiHeader, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { randomBytes, randomUUID } from "node:crypto";
-import { IsEmail, IsOptional, IsString, IsTimeZone } from "class-validator";
+import { IsEmail, IsOptional, IsString, IsTimeZone, MaxLength } from "class-validator";
 import { ConfigService } from "@nestjs/config";
 
 import { API_VERSIONS_VALUES } from "@/lib/api-versions";
 import { API_KEY_HEADER } from "@/lib/docs/headers";
 import { sha256Hash } from "@/lib/api-key";
+import { GetUser } from "@/modules/auth/decorators/get-user/get-user.decorator";
 import { ApiAuthGuard } from "@/modules/auth/guards/api-auth/api-auth.guard";
+import type { ApiAuthGuardUser } from "@/modules/auth/strategies/api-auth/api-auth.strategy";
 import { PrismaWriteService } from "@/modules/prisma/prisma-write.service";
 import { PrismaReadService } from "@/modules/prisma/prisma-read.service";
 
@@ -24,6 +38,13 @@ class CreateUserInput {
   @IsTimeZone()
   @IsOptional()
   timeZone?: string;
+}
+
+class CreateApiKeyInput {
+  @IsString()
+  @MaxLength(255)
+  @IsOptional()
+  note?: string;
 }
 
 /**
@@ -60,7 +81,8 @@ export class UsersController {
   @Post("/")
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: "Create a cal.diy user + mint per-user API key (admin auth required)" })
-  async createUser(@Body() body: CreateUserInput) {
+  async createUser(@Body() body: CreateUserInput, @GetUser() authUser: ApiAuthGuardUser) {
+    this._assertSystemAdmin(authUser);
     const existing = await this.dbRead.prisma.user.findUnique({ where: { email: body.email } });
     if (existing) {
       // Re-provision case. Don't rotate the key here — that would
@@ -119,6 +141,76 @@ export class UsersController {
         apiKey,
       },
     };
+  }
+
+  /**
+   * Mint a new API key for an EXISTING cal.diy user. Backfill path for
+   * CalcomLink rows whose calcom_user_api_key column is empty (rows
+   * created before the C-1 minting endpoint shipped, or any row where
+   * the create-user response returned apiKey=null because the user
+   * already existed). Admin auth only.
+   *
+   * Idempotency: this endpoint MINTS A NEW KEY every call. cal.com's
+   * ApiKey table allows multiple unexpired keys per user, so repeated
+   * calls don't break, but the caller is responsible for not re-minting
+   * once it has a working key. pl-api's backfill command checks for a
+   * blank column before calling.
+   */
+  @Post("/:userId/api-keys")
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: "Mint a new API key for an existing cal.diy user (admin auth required)" })
+  async createApiKeyForUser(
+    @Param("userId") userIdRaw: string,
+    @Body() body: CreateApiKeyInput,
+    @GetUser() authUser: ApiAuthGuardUser,
+  ) {
+    this._assertSystemAdmin(authUser);
+
+    const userId = parseInt(userIdRaw, 10);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      throw new BadRequestException("userId path param must be a positive integer");
+    }
+
+    const user = await this.dbRead.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException(`cal.diy user ${userId} not found`);
+    }
+
+    // NestJS instantiates the DTO for empty/missing bodies (all fields
+    // optional), so `body` is at minimum `{}` here — `?.trim()` plus the
+    // `||` fallback safely handles both the no-body and explicit-note
+    // cases. The concrete DTO type preserves class-validator's runtime
+    // checks (a union with `undefined` collapses to `Object` and skips
+    // validation; codex pass-6 P2).
+    const note = body.note?.trim() || "PrecedentLab pl-api per-tenant key (backfill)";
+    const apiKey = await this._mintApiKey(userId, note);
+
+    return {
+      status: SUCCESS_STATUS,
+      data: {
+        userId,
+        apiKey,
+      },
+    };
+  }
+
+  /**
+   * Gate both endpoints on the cal.diy system-admin user. ApiAuthGuard
+   * only proves the bearer is valid — it doesn't say WHICH user. Without
+   * this check, any cal.diy user with an API key (which is anyone, since
+   * users can mint their own via the standard /api-keys route) could
+   * call POST /v2/users/:otherUserId/api-keys and walk away with a
+   * plaintext never-expiring key for another account. Codex caught this
+   * on review 2026-05-19.
+   *
+   * isSystemAdmin is populated by ApiAuthStrategy from User.role === "ADMIN"
+   * (api-auth.strategy.ts:162). The PL admin seed sets that role for the
+   * single user pl-api authenticates as.
+   */
+  private _assertSystemAdmin(authUser: ApiAuthGuardUser | undefined | null): void {
+    if (!authUser?.isSystemAdmin) {
+      throw new ForbiddenException("system admin auth required");
+    }
   }
 
   /**

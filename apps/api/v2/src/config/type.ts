@@ -32,6 +32,12 @@ export type AppConfig = {
   app: {
     baseUrl: string;
   };
+  plOAuth: {
+    stateHmacKey: string;
+    stateHmacKeyPrevious: string;
+    webhookUrl: string;
+    webhookSecret: string;
+  };
   e2e: boolean;
   enableSlotsWorkers: boolean;
   slotsWorkerPoolSize: number;
